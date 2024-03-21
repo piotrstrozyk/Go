@@ -16,7 +16,11 @@ fmt.Println(i)
 os.Stdout.Write([]byte(strconv.Itoa(number)))
 */
 
-
+/*Grupa2
+.Unmarshall
+json.MarshalIndent 
+var payload []Person
+err = json
 
 //fmt.Scan()
 package main
