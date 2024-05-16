@@ -11,7 +11,7 @@ func pesel() {
 		liczba /= 10
 	}
 	var sum = 0
-	waga := [10]int{1,3,7,9,1,3,7,9,1,3,0}
+	waga := [10]int{1,3,7,9,1,3,7,9,1,3}
 	for i, v := range cyfry{
 		fmt.Println(v, waga[i])
 		if v*waga[i] >= 10{
