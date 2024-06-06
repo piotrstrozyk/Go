@@ -151,6 +151,7 @@ func drawHexagon(x, y float32, radius float32, color rl.Color) {
 		rl.DrawLineV(points[i], points[(i+1)%6], rl.Black)
 	}
 }
+//obrócić hexagony
 
 func drawBoard(board *Board) {
 	for pos, cell := range board.Cells {
@@ -215,3 +216,5 @@ func main() {
 		rl.EndDrawing()
 	}
 }
+//mrówki bez planszy? pozbyć się pustych pól dla optymalizacji
+
