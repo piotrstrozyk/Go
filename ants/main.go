@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -11,22 +10,29 @@ import (
 
 const (
 	MaxX       = 80
-	MaxY       = 30
+	MaxY       = 40
 	NumAnts    = 50
 	NumLeaves  = 200
 	RestPeriod = 10
 	HexRadius  = 20
 	HexHeight  = HexRadius * 2
+	Scale      = 0.7
 )
 
 var (
 	HexWidth     = math.Sqrt(3) * HexRadius
-	ScreenWidth  = int32(MaxX) * int32(HexWidth)
-	ScreenHeight = int32(MaxY) * int32(HexHeight*3/4)
+	ScreenWidth  = int32(float32(MaxX) * float32(HexWidth) * Scale)
+	ScreenHeight = int32(float32(MaxY) * float32(HexHeight) * Scale)
+	OffsetX      = (int32(rl.GetScreenWidth()) - ScreenWidth) / 2
+	OffsetY      = (int32(rl.GetScreenHeight()) - ScreenHeight) / 2
 )
 
 type Position struct {
 	X, Y int
+}
+
+type MyRand struct {
+	seed int64
 }
 
 type Ant struct {
@@ -40,33 +46,34 @@ type Leaf struct {
 }
 
 type Board struct {
-	Cells  map[Position]rune
 	Ants   []*Ant
 	Leaves []*Leaf
 }
 
-func NewBoard() *Board {
-	board := &Board{
-		Cells: make(map[Position]rune),
-	}
+func NewMyRand() *MyRand {
+	return &MyRand{seed: time.Now().UnixNano()}
+}
 
+func (r *MyRand) Intn(n int) int {
+	r.seed = (r.seed*9301 + 49297) % 233280
+	return int(r.seed % int64(n))
+}
+
+func NewBoard() *Board {
+	board := &Board{}
 	return board
 }
 
 func (b *Board) AddAnt(a *Ant) {
 	b.Ants = append(b.Ants, a)
-	b.Cells[a.Pos] = 'A'
 }
 
 func (b *Board) AddLeaf(l *Leaf) {
 	b.Leaves = append(b.Leaves, l)
-	b.Cells[l.Pos] = 'L'
 }
 
 func (b *Board) MoveAnt(a *Ant, newPos Position) {
-	delete(b.Cells, a.Pos)
 	a.Pos = newPos
-	b.Cells[a.Pos] = 'A'
 }
 
 func (b *Board) FindEmptyAdjacent(pos Position) (Position, bool) {
@@ -77,7 +84,7 @@ func (b *Board) FindEmptyAdjacent(pos Position) (Position, bool) {
 
 	for _, dir := range directions {
 		adjacentPos := Position{X: (pos.X + dir.X + MaxX) % MaxX, Y: (pos.Y + dir.Y + MaxY) % MaxY}
-		if b.Cells[adjacentPos] == 0 {
+		if !b.IsOccupied(adjacentPos) {
 			return adjacentPos, true
 		}
 	}
@@ -85,47 +92,52 @@ func (b *Board) FindEmptyAdjacent(pos Position) (Position, bool) {
 	return Position{}, false
 }
 
+func (b *Board) IsOccupied(pos Position) bool {
+	for _, ant := range b.Ants {
+		if ant.Pos == pos {
+			return true
+		}
+	}
+	for _, leaf := range b.Leaves {
+		if leaf.Pos == pos {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Board) SimulateStep() {
+
+	myRand := NewMyRand()
 	directions := []Position{
 		{1, 0}, {1, -1}, {0, -1},
 		{-1, 0}, {-1, 1}, {0, 1},
 	}
 
 	for _, ant := range b.Ants {
+		dir := directions[myRand.Intn(len(directions))]
+		newPos := Position{X: (ant.Pos.X + dir.X + MaxX) % MaxX, Y: (ant.Pos.Y + dir.Y + MaxY) % MaxY}
+
 		if ant.Resting > 0 {
-			dir := directions[rand.Intn(len(directions))]
-			newPos := Position{X: (ant.Pos.X + dir.X + MaxX) % MaxX, Y: (ant.Pos.Y + dir.Y + MaxY) % MaxY}
-
-			if b.Cells[newPos] == 'L' {
-				adjacentPos, found := b.FindEmptyAdjacent(newPos)
-				if found {
-					b.AddLeaf(&Leaf{Pos: adjacentPos})
-				}
-			}
-
-			b.MoveAnt(ant, newPos)
+			// Ant is resting, just move without interacting with leaves
 			ant.Resting--
+			b.MoveAnt(ant, newPos)
 			continue
 		}
 
-		dir := directions[rand.Intn(len(directions))]
-		newPos := Position{X: (ant.Pos.X + dir.X + MaxX) % MaxX, Y: (ant.Pos.Y + dir.Y + MaxY) % MaxY}
-
-		if b.Cells[newPos] == 'L' {
+		if leaf := b.LeafAt(newPos); leaf != nil {
 			if ant.Carrying {
-				// Odłóż jeden liść na aktualne pole i drugi na sąsiednie puste pole
+				// Drop the leaf and start resting
 				adjacentPos, found := b.FindEmptyAdjacent(newPos)
 				if found {
 					b.AddLeaf(&Leaf{Pos: adjacentPos})
-				}
-				adjacentPos2, found2 := b.FindEmptyAdjacent(newPos)
-				if found2 {
-					b.AddLeaf(&Leaf{Pos: adjacentPos2})
 				}
 				ant.Carrying = false
 				ant.Resting = RestPeriod
 			} else {
+				// Pick up the leaf
 				ant.Carrying = true
+				b.RemoveLeaf(leaf)
 			}
 		}
 
@@ -133,47 +145,52 @@ func (b *Board) SimulateStep() {
 	}
 }
 
+func (b *Board) LeafAt(pos Position) *Leaf {
+	for _, leaf := range b.Leaves {
+		if leaf.Pos == pos {
+			return leaf
+		}
+	}
+	return nil
+}
+
+func (b *Board) RemoveLeaf(leaf *Leaf) {
+	for i, l := range b.Leaves {
+		if l == leaf {
+			b.Leaves = append(b.Leaves[:i], b.Leaves[i+1:]...)
+			break
+		}
+	}
+}
+
 func hexToPixel(pos Position) (float32, float32) {
-	x := float32(HexWidth) * (float32(pos.X) + 0.5*float32(pos.Y%2))
-	y := float32(HexHeight) * (3.0 / 4.0 * float32(pos.Y))
-	return x, y
+	x := float32(HexRadius) * 3.0 / 2.0 * float32(pos.X)
+	y := float32(HexHeight) * (float32(pos.Y) + 0.5*float32(pos.X%2))
+	return x*Scale + float32(OffsetX), y*Scale + float32(OffsetY) // Zastosowanie skali i przesunięcia
 }
 
 func drawHexagon(x, y float32, radius float32, color rl.Color) {
 	points := make([]rl.Vector2, 6)
 	for i := 0; i < 6; i++ {
 		angle := float32(i) * (math.Pi / 3)
-		points[i] = rl.NewVector2(x+radius*float32(math.Cos(float64(angle))), y+radius*float32(math.Sin(float64(angle))))
+		points[i] = rl.NewVector2(x+radius*float32(math.Cos(float64(angle)))*Scale, y+radius*float32(math.Sin(float64(angle)))*Scale) // Zastosowanie skali
 	}
-	rl.DrawPoly(rl.NewVector2(x, y), 6, radius, 0, color)
-	// Draw outline
-	for i := 0; i < 6; i++ {
-		rl.DrawLineV(points[i], points[(i+1)%6], rl.Black)
-	}
+	rl.DrawPoly(rl.NewVector2(x, y), 6, radius*Scale, 0, color) // Zastosowanie skali
 }
-//obrócić hexagony
 
 func drawBoard(board *Board) {
-	for pos, cell := range board.Cells {
-		x, y := hexToPixel(pos)
-		color := rl.NewColor(0, 121, 241, 255)
-		switch cell {
-		case 'A':
-			for _, ant := range board.Ants {
-				if ant.Pos == pos {
-					if ant.Carrying {
-						color = rl.Red
-					} else {
-						color = rl.Black
-					}
-					break
-				}
-			}
-		case 'L':
-			color = rl.Green
+	for _, ant := range board.Ants {
+		x, y := hexToPixel(ant.Pos)
+		color := rl.Black
+		if ant.Carrying {
+			color = rl.Red
 		}
-		fmt.Printf("Drawing hex at %d,%d -> %f,%f with color %v\n", pos.X, pos.Y, x, y, color)
 		drawHexagon(x, y, HexRadius, color)
+	}
+
+	for _, leaf := range board.Leaves {
+		x, y := hexToPixel(leaf.Pos)
+		drawHexagon(x, y, HexRadius, rl.Green)
 	}
 }
 
@@ -201,9 +218,11 @@ func main() {
 		board.AddLeaf(leaf)
 	}
 
-	rl.InitWindow(ScreenWidth, ScreenHeight, "Ants Simulation on Hexagonal Grid")
+	rl.InitWindow(int32(float32(MaxX)*float32(HexWidth)*Scale), int32(float32(MaxY)*float32(HexHeight*3/4)*Scale), "Ants Simulation on Hexagonal Grid")
 	defer rl.CloseWindow()
 
+	OffsetX = (int32(rl.GetScreenWidth()) - ScreenWidth) / 2
+	OffsetY = (int32(rl.GetScreenHeight()) - ScreenHeight) / 2
 	rl.SetTargetFPS(10)
 
 	for !rl.WindowShouldClose() {
@@ -216,5 +235,3 @@ func main() {
 		rl.EndDrawing()
 	}
 }
-//mrówki bez planszy? pozbyć się pustych pól dla optymalizacji
-
