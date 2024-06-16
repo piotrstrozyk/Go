@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/eiannone/keyboard"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/vg"
 )
 
+// Constants for the simulation
 const (
 	width  = 20
 	height = 20
@@ -19,20 +23,24 @@ const (
 	axe    = '🪓'
 )
 
+// Forest struct represents the forest simulation
 type Forest struct {
-	grid [][]rune
-	axeX int
-	axeY int
+	grid              [][]rune
+	axeX              int
+	axeY              int
+	burnedPercentages []float64
 	sync.Mutex
 }
 
 func newForest() *Forest {
 	rand.Seed(time.Now().UnixNano())
 	forest := &Forest{
-		grid: make([][]rune, height),
-		axeX: width / 2,
-		axeY: height / 2,
+		grid:              make([][]rune, height),
+		axeX:              width / 2,
+		axeY:              height / 2,
+		burnedPercentages: []float64{},
 	}
+	// initialize the grid
 	for i := range forest.grid {
 		forest.grid[i] = make([]rune, width)
 		for j := range forest.grid[i] {
@@ -47,6 +55,7 @@ func newForest() *Forest {
 	return forest
 }
 
+// displays the current state of the forest
 func (f *Forest) print() {
 	f.Lock()
 	defer f.Unlock()
@@ -65,6 +74,7 @@ func (f *Forest) print() {
 	}
 }
 
+// simulates the spread of fire
 func (f *Forest) spreadFire(x, y int) {
 	if x < 0 || x >= width || y < 0 || y >= height {
 		return
@@ -109,6 +119,7 @@ func (f *Forest) ignite() {
 	f.spreadFire(x, y)
 }
 
+// moveAxe moves the axe in the given direction
 func (f *Forest) moveAxe(dx, dy int) {
 	f.Lock()
 	newX, newY := f.axeX+dx, f.axeY+dy
@@ -124,6 +135,7 @@ func (f *Forest) moveAxe(dx, dy int) {
 	f.spreadFireAfterCut()
 }
 
+// handles user input
 func (f *Forest) userInteraction() {
 	if err := keyboard.Open(); err != nil {
 		panic(err)
@@ -154,12 +166,14 @@ func (f *Forest) userInteraction() {
 			f.print()
 			f.spreadFireAfterCut()
 			f.printRemainingPercentage()
+			f.printBurnedPercentages()
+			f.generatePlot()
 			os.Exit(0)
-
 		}
 	}
 }
 
+// spreadFireAfterCut spreads the fire after the axe has been moved
 func (f *Forest) spreadFireAfterCut() {
 	f.Lock()
 	newFire := make([][2]int, 0)
@@ -183,10 +197,36 @@ func (f *Forest) spreadFireAfterCut() {
 	for _, pos := range newFire {
 		f.grid[pos[1]][pos[0]] = fire
 	}
+	f.calculateBurnedPercentage()
 	f.Unlock()
 	f.print()
 }
 
+// calculates the percentage of the forest that has been burned
+func (f *Forest) calculateBurnedPercentage() {
+	total, burned := 0, 0
+	for _, row := range f.grid {
+		for _, cell := range row {
+			if cell == tree || cell == fire {
+				total++
+			}
+			if cell == fire {
+				burned++
+			}
+		}
+	}
+	percentage := (float64(burned) / float64(total)) * 100
+	if len(f.burnedPercentages) >= 2 &&
+		f.burnedPercentages[len(f.burnedPercentages)-1] == percentage &&
+		f.burnedPercentages[len(f.burnedPercentages)-2] == percentage {
+		f.printBurnedPercentages()
+		f.generatePlot()
+		os.Exit(0)
+	}
+	f.burnedPercentages = append(f.burnedPercentages, percentage)
+}
+
+// prints the remaining percentage of the forest
 func (f *Forest) printRemainingPercentage() {
 	f.Lock()
 	defer f.Unlock()
@@ -206,18 +246,43 @@ func (f *Forest) printRemainingPercentage() {
 	fmt.Printf("\nPercentage of forest burned: %.2f%%\n", float64(burned)/float64(total)*100)
 }
 
+// prints the percentages of the forest that have been burned over time
+func (f *Forest) printBurnedPercentages() {
+	fmt.Println("\nBurned Percentages over Time:")
+	for i, percentage := range f.burnedPercentages {
+		fmt.Printf("Iteration %d: %.2f%%\n", i+1, percentage)
+	}
+}
+
+// generates a plot of the percentages of the forest that have been burned over time
+func (f *Forest) generatePlot() {
+	p := plot.New()
+
+	p.Title.Text = "Percentage of Forest Burned Over Time"
+	p.X.Label.Text = "Iteration"
+	p.Y.Label.Text = "Percentage Burned"
+
+	pts := make(plotter.XYs, len(f.burnedPercentages))
+	for i, v := range f.burnedPercentages {
+		pts[i].X = float64(i + 1)
+		pts[i].Y = v
+	}
+
+	line, points, err := plotter.NewLinePoints(pts)
+	if err != nil {
+		panic(err)
+	}
+
+	p.Add(line, points)
+	if err := p.Save(6*vg.Inch, 6*vg.Inch, "forest_fire.png"); err != nil {
+		panic(err)
+	}
+	fmt.Println("Plot saved as forest_fire.png")
+}
+
 func main() {
 	forest := newForest()
 	forest.print()
 	forest.ignite()
 	forest.userInteraction()
 }
-
-//Na przykład, metoda spreadFire() sprawdza, czy dana komórka jest drzewem,
-//a następnie zmienia jej stan na ogień. Jeśli dwa wątki wywołałyby tę metodę jednocześnie na
-//tej samej komórce, mogłoby dojść do sytuacji, w której jeden wątek sprawdziłby, czy komórka jest drzewem,
-//a następnie drugi wątek zmieniłby jej stan na ogień zanim pierwszy wątek zdążyłby to zrobić.
-//W rezultacie, pierwszy wątek mógłby próbować zmienić stan komórki, która już jest ogniem,
-//co mogłoby prowadzić do nieprawidłowego zachowania programu.
-
-//go get github.com/eiannone/keyboard
